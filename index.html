@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Butterfly Genetic Drift Simulation</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0; padding: 0;
+    }
+    .container { display: flex; height: 100vh; }
+    #simulation-area {
+      flex: 3;
+      background-color: #e8f4f8;
+      position: relative;
+      border: 2px solid #ccc;
+      overflow: hidden;
+    }
+    #control-panel {
+      flex: 1;
+      background-color: #f0f0f0;
+      padding: 20px;
+      border-left: 2px solid #ccc;
+      overflow-y: auto;
+    }
+    .butterfly {
+      position: absolute;
+      z-index: 5;
+      opacity: 1;
+      transition:
+        transform 0.3s ease-out,
+        left 3s ease-in-out,
+        top 3s ease-in-out,
+        opacity 1s ease-in-out;
+    }
+    .butterfly svg { width: 30px; height: 30px; }
+    .butterfly__wing {
+      transform-origin: center;
+      animation: flutter 150ms alternate infinite ease-in-out;
+    }
+    @keyframes flutter {
+      from { transform: rotateY(0deg); }
+      to   { transform: rotateY(60deg); }
+    }
+    .blue-butterfly   { color: dodgerblue; }
+    .red-butterfly    { color: #e74c3c; }
+    .yellow-butterfly { color: #f1c40f; }
+    button {
+      display: block; width: 100%; padding: 10px;
+      margin: 10px 0; background-color: #4CAF50;
+      color: white; border: none; border-radius: 4px;
+      cursor: pointer; font-size: 16px;
+    }
+    button:hover { background-color: #45a049; }
+    #disaster-buttons button {
+      background-color: #f44336;
+    }
+    #disaster-buttons button:hover {
+      background-color: #d32f2f;
+    }
+    .stats-container {
+      margin-top: 20px;
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
+    }
+    .color-bar {
+      height: 20px;
+      background-color: #ddd;
+      margin: 5px 0;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .color-fill {
+      height: 100%;
+      border-radius: 4px;
+    }
+    .generation-counter {
+      font-size: 18px;
+      font-weight: bold;
+      text-align: center;
+      margin: 15px 0;
+    }
+    h3 {
+      margin-top: 20px;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="simulation-area"></div>
+    <div id="control-panel">
+      <h2>Butterfly Genetic Drift</h2>
+      <button id="breed-btn">Breed Next Generation</button>
+      <button id="reset-btn">Reset Simulation</button>
+      <div class="generation-counter">
+        Generation: <span id="generation">1</span>
+      </div>
+      <div class="stats-container">
+        <h3>Population Stats</h3>
+        <div id="stats-area"></div>
+      </div>
+      <h3>Natural Disasters</h3>
+      <div id="disaster-buttons">
+        <button data-type="tornado">Tornado 🌪️</button>
+        <button data-type="tsunami">Tsunami 🌊</button>
+        <button data-type="thunderstorm">Storm ⛈️</button>
+        <button data-type="earthquake">Earthquake 🌋</button>
+        <button data-type="heatwave">Heatwave 🔥</button>
+      </div>
+      <div class="stats-container">
+        <h3>How It Works</h3>
+        <p>Each butterfly has a genotype that determines its color. When breeding, offspring inherit one random allele from each parent.</p>
+        <p>In large populations, allele frequencies remain stable. But when a disaster reduces the population, random chance can dramatically shift these frequencies—and often wipes out an allele entirely!</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const INITIAL_ALLELE_FREQS = { A: 0.40, B: 0.35, C: 0.25 };
+    let ALLELE_FREQS = { ...INITIAL_ALLELE_FREQS };
+
+    const DRIFT_AMOUNT    = 0.01;   // ±1% per generation
+    const MIN_ALLELE_FREQ = 0.01;   // clamp non-zero alleles ≥1%
+
+    const COLORS = [
+      { color: 'dodgerblue', name: 'Blue',   cssClass: 'blue-butterfly' },
+      { color: '#e74c3c',   name: 'Red',    cssClass: 'red-butterfly'   },
+      { color: '#f1c40f',   name: 'Yellow', cssClass: 'yellow-butterfly'}
+    ];
+    const GENOTYPES = {
+      'AA': 0, 'AB': 0, 'AC': 0,
+      'BB': 1, 'BC': 1,
+      'CC': 2
+    };
+    const INIT_POPULATION = 50;
+    const MAX_POPULATION  = 100;
+
+    let butterflies = [];
+    let generation  = 1;
+
+    const simArea      = document.getElementById('simulation-area');
+    const breedBtn     = document.getElementById('breed-btn');
+    const resetBtn     = document.getElementById('reset-btn');
+    const genCount     = document.getElementById('generation');
+    const statsArea    = document.getElementById('stats-area');
+    const disasterBtns = document.querySelectorAll('#disaster-buttons button');
+
+    function randomAllele() {
+      let r = Math.random(), cum = 0;
+      for (let [a, f] of Object.entries(ALLELE_FREQS)) {
+        cum += f;
+        if (r < cum) return a;
+      }
+      return 'A';
+    }
+
+    function applyDrift() {
+      let newFreqs = {}, sum = 0;
+      for (let a in ALLELE_FREQS) {
+        if (ALLELE_FREQS[a] > 0) {
+          let d = ALLELE_FREQS[a] + (Math.random()*2 -1)*DRIFT_AMOUNT;
+          d = Math.max(d, MIN_ALLELE_FREQ);
+          newFreqs[a] = d;
+          sum += d;
+        } else {
+          newFreqs[a] = 0;
+        }
+      }
+      if (sum > 0) {
+        for (let a in newFreqs) {
+          if (newFreqs[a] > 0) newFreqs[a] /= sum;
+        }
+      }
+      ALLELE_FREQS = newFreqs;
+    }
+
+    function shuffle(arr) {
+      const a = arr.slice();
+      for (let i = a.length-1; i>0; i--) {
+        const j = Math.floor(Math.random()* (i+1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    function createButterfly(gen) {
+      const idx = GENOTYPES[gen];
+      const b = document.createElement('div');
+      b.className = `butterfly ${COLORS[idx].cssClass}`;
+      b.innerHTML = `
+        <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+          <g class="butterfly__wing" style="transform-origin:50px 50px;">
+            <path d="M50,35 C30,20 10,20 5,40 C0,60 20,60 50,45" fill="currentColor"/>
+            <path d="M50,45 C30,60 15,80 20,90 C30,95 40,80 50,65" fill="currentColor"/>
+          </g>
+          <g class="butterfly__wing" style="transform-origin:50px 50px;">
+            <path d="M50,35 C70,20 90,20 95,40 C100,60 80,60 50,45" fill="currentColor"/>
+            <path d="M50,45 C70,60 85,80 80,90 C70,95 60,80 50,65" fill="currentColor"/>
+          </g>
+          <path d="M48,30 L52,30 L52,70 L48,70 Z" fill="black"/>
+          <path d="M48,30 C45,25 40,20 35,18" stroke="black" fill="none"/>
+          <path d="M52,30 C55,25 60,20 65,18" stroke="black" fill="none"/>
+        </svg>`;
+      const w = simArea.clientWidth, h = simArea.clientHeight;
+      b.style.left = `${Math.random()*(w-50)}px`;
+      b.style.top  = `${Math.random()*(h-50)}px`;
+      b.dataset.genotype   = gen;
+      b.dataset.colorIndex = idx;
+      butterflies.push(b);
+      simArea.appendChild(b);
+      moveButterfly(b);
+      return b;
+    }
+
+    function moveButterfly(b) {
+      const step = () => {
+        const w = simArea.clientWidth, h = simArea.clientHeight;
+        let x = parseFloat(b.style.left), y = parseFloat(b.style.top);
+        x = Math.max(10, Math.min(w-40, x + (Math.random()*100-50)));
+        y = Math.max(10, Math.min(h-40, y + (Math.random()*100-50)));
+        b.style.left = `${x}px`;
+        b.style.top  = `${y}px`;
+        b.style.transform = `rotate(${Math.random()*60-30}deg)`;
+        if (b.isConnected) setTimeout(step, 2000 + Math.random()*3000);
+      };
+      setTimeout(step, Math.random()*2000);
+    }
+
+    function updateStats() {
+      const counts = [0,0,0], alleles = {A:0,B:0,C:0};
+      butterflies.forEach(b => {
+        counts[+b.dataset.colorIndex]++;
+        const g = b.dataset.genotype;
+        alleles[g[0]]++; alleles[g[1]]++;
+      });
+      const total = butterflies.length, totalAlleles = total*2;
+      let html = '<b>Phenotypes (Colors):</b>';
+      COLORS.forEach((c,i) => {
+        const pct = total ? ((counts[i]/total)*100).toFixed(1) : 0;
+        html += `
+          <div>${c.name}: ${counts[i]} (${pct}%)</div>
+          <div class="color-bar"><div class="color-fill" style="width:${pct}%;background-color:${c.color}"></div></div>
+        `;
+      });
+      html += '<b>Allele Frequencies:</b>';
+      for (let a of ['A','B','C']) {
+        const pct = totalAlleles ? ((alleles[a]/totalAlleles)*100).toFixed(1) : 0;
+        html += `
+          <div>Allele ${a}: ${pct}%</div>
+          <div class="color-bar"><div class="color-fill" style="width:${pct}%;background-color:purple"></div></div>
+        `;
+      }
+      statsArea.innerHTML = html;
+    }
+
+    function initSimulation() {
+      ALLELE_FREQS = { ...INITIAL_ALLELE_FREQS };
+      butterflies.forEach(b => b.remove());
+      butterflies = [];
+      generation = 1;
+      genCount.textContent = generation;
+      for (let i = 0; i < INIT_POPULATION; i++) {
+        const g1 = randomAllele(), g2 = randomAllele();
+        createButterfly([g1,g2].sort().join(''));
+      }
+      updateStats();
+    }
+
+    function breedNextGeneration() {
+      if (!butterflies.length) return alert("Population extinct! Please reset.");
+      applyDrift();
+      const newGen = [];
+      const newSize = Math.min(MAX_POPULATION, Math.floor(butterflies.length * 1.5));
+      for (let i = 0; i < newSize; i++) {
+        const a1 = randomAllele(), a2 = randomAllele();
+        newGen.push([a1,a2].sort().join(''));
+      }
+      butterflies.forEach(b => b.remove());
+      butterflies = newGen.map(createButterfly);
+      generation++;
+      genCount.textContent = generation;
+      updateStats();
+    }
+
+    function updateBaseAlleleFreqs() {
+      const counts = {A:0,B:0,C:0};
+      butterflies.forEach(b => {
+        const g = b.dataset.genotype;
+        counts[g[0]]++; counts[g[1]]++;
+      });
+      const totalAlleles = butterflies.length * 2;
+      for (let a of ['A','B','C']) {
+        ALLELE_FREQS[a] = totalAlleles ? counts[a]/totalAlleles : 0;
+      }
+    }
+
+    function executeDisaster(type) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `
+        position:absolute; top:0; left:0; width:100%; height:100%;
+        display:flex; align-items:center; justify-content:center;
+        font-size:80px; background:rgba(0,0,0,0.5); z-index:100;
+      `;
+      overlay.textContent = {
+        tornado: '🌪️',
+        tsunami: '🌊',
+        thunderstorm: '⛈️',
+        earthquake: '🌋',
+        heatwave: '☀️'
+      }[type];
+      simArea.appendChild(overlay);
+
+      // decide survivors immediately
+      let survivors;
+      if (Math.random() < 0.6) {
+        const alleles = ['A','B','C'];
+        const wipe = alleles[Math.floor(Math.random()*3)];
+        survivors = butterflies.filter(b => !b.dataset.genotype.includes(wipe));
+        if (survivors.length > 8) survivors = shuffle(survivors).slice(0,8);
+        if (!survivors.length) survivors = shuffle(butterflies).slice(0,8);
+      } else {
+        survivors = shuffle(butterflies).slice(0,8);
+      }
+
+      // fade out those not surviving
+      const fadeTime = 1000;
+      butterflies.forEach(b => {
+        if (!survivors.includes(b)) b.style.opacity = 0;
+      });
+
+      setTimeout(() => {
+        // remove non-survivors
+        butterflies.forEach(b => {
+          if (!survivors.includes(b)) b.remove();
+        });
+        butterflies = survivors;
+
+        updateStats();
+        updateBaseAlleleFreqs();
+
+        setTimeout(() => overlay.remove(), 500);
+      }, fadeTime);
+    }
+
+    breedBtn.addEventListener('click', breedNextGeneration);
+    resetBtn.addEventListener('click', initSimulation);
+    disasterBtns.forEach(b => b.addEventListener('click', () => executeDisaster(b.dataset.type)));
+
+    window.addEventListener('load', () => setTimeout(initSimulation,100));
+  </script>
+</body>
+</html>
