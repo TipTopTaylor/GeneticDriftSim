@@ -86,6 +86,55 @@
       border-bottom: 1px solid #ccc;
       padding-bottom: 5px;
     }
+    /* Toggle switch styling */
+    .switch-container {
+      display: flex;
+      align-items: center;
+      margin: 20px 0;
+      padding: 10px;
+      background-color: #e0e0e0;
+      border-radius: 4px;
+    }
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 60px;
+      height: 30px;
+      margin: 0 10px;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #ccc;
+      transition: .4s;
+      border-radius: 34px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 22px;
+      width: 22px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: #2196F3;
+    }
+    input:checked + .slider:before {
+      transform: translateX(30px);
+    }
+    .mode-label {
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
@@ -93,6 +142,16 @@
     <div id="simulation-area"></div>
     <div id="control-panel">
       <h2>Butterfly Genetic Drift</h2>
+      
+      <div class="switch-container">
+        <span class="mode-label">Stochastic Mode</span>
+        <label class="switch">
+          <input type="checkbox" id="mode-toggle">
+          <span class="slider"></span>
+        </label>
+        <span class="mode-label">Simplified Mode</span>
+      </div>
+      
       <button id="breed-btn">Breed Next Generation</button>
       <button id="reset-btn">Reset Simulation</button>
       <div class="generation-counter">
@@ -112,17 +171,31 @@
       </div>
       <div class="stats-container">
         <h3>How It Works</h3>
-        <p>Each butterfly has a genotype that determines its color. When breeding, offspring inherit one random allele from each parent. Blue is dominant, red is second, yellow is third. </p>
+        <p>Each butterfly has a genotype that determines its color. When breeding, offspring inherit one random allele from each parent. Blue is dominant, red is second, yellow is third.</p>
+        <p><strong>Stochastic Mode:</strong> More complex variation and unpredictable effects.</p>
+        <p><strong>Simplified Mode:</strong> More predictable outcomes to highlight the effect. Use this mode with the worksheet!</p>
       </div>
     </div>
   </div>
 
   <script>
-    const INITIAL_ALLELE_FREQS = { A: 0.40, B: 0.35, C: 0.25 };
+    // The initial frequencies ensure A > B > C order (blue > red > yellow)
+    const INITIAL_ALLELE_FREQS = { A: 0.50, B: 0.30, C: 0.20 };
     let ALLELE_FREQS = { ...INITIAL_ALLELE_FREQS };
 
-    const DRIFT_AMOUNT    = 0.01;   // ±1% per generation
-    const MIN_ALLELE_FREQ = 0.01;   // clamp non-zero alleles ≥1%
+    const RANDOMIZER_MODE = {
+      DRIFT_AMOUNT: 0.01,    // ±1% per generation
+      MIN_ALLELE_FREQ: 0.01  // clamp non-zero alleles ≥1%
+    };
+    
+    const LESS_RANDOM_MODE = {
+      DRIFT_AMOUNT: 0.005,   // ±0.5% per generation
+      MIN_ALLELE_FREQ: 0.02  // clamp non-zero alleles ≥2%
+    };
+    
+    // Default to randomizer mode
+    let DRIFT_AMOUNT = RANDOMIZER_MODE.DRIFT_AMOUNT;
+    let MIN_ALLELE_FREQ = RANDOMIZER_MODE.MIN_ALLELE_FREQ;
 
     const COLORS = [
       { color: 'dodgerblue', name: 'Blue',   cssClass: 'blue-butterfly' },
@@ -139,6 +212,7 @@
 
     let butterflies = [];
     let generation  = 1;
+    let lessRandomMode = false;
 
     const simArea      = document.getElementById('simulation-area');
     const breedBtn     = document.getElementById('breed-btn');
@@ -146,6 +220,7 @@
     const genCount     = document.getElementById('generation');
     const statsArea    = document.getElementById('stats-area');
     const disasterBtns = document.querySelectorAll('#disaster-buttons button');
+    const modeToggle   = document.getElementById('mode-toggle');
 
     function randomAllele() {
       let r = Math.random(), cum = 0;
@@ -157,10 +232,20 @@
     }
 
     function applyDrift() {
+      if (lessRandomMode) {
+        // Less random mode - maintain frequency order
+        applyConstrainedDrift();
+      } else {
+        // Random-er mode - original algorithm
+        applyRandomDrift();
+      }
+    }
+    
+    function applyRandomDrift() {
       let newFreqs = {}, sum = 0;
       for (let a in ALLELE_FREQS) {
         if (ALLELE_FREQS[a] > 0) {
-          let d = ALLELE_FREQS[a] + (Math.random()*2 -1)*DRIFT_AMOUNT;
+          let d = ALLELE_FREQS[a] + (Math.random()*2 - 1) * DRIFT_AMOUNT;
           d = Math.max(d, MIN_ALLELE_FREQ);
           newFreqs[a] = d;
           sum += d;
@@ -174,6 +259,70 @@
         }
       }
       ALLELE_FREQS = newFreqs;
+    }
+    
+    function applyConstrainedDrift() {
+      // Instead of using the current sorted order, we'll enforce the preset order: A > B > C
+      // This ensures blue always remains dominant, red second, yellow third
+      
+      // Start with small, controlled adjustments
+      let newFreqs = { 
+        A: ALLELE_FREQS.A, 
+        B: ALLELE_FREQS.B, 
+        C: ALLELE_FREQS.C 
+      };
+      
+      // Apply very small random adjustments
+      const driftA = (Math.random() * DRIFT_AMOUNT / 2) * (Math.random() > 0.7 ? 1 : -1);
+      const driftB = (Math.random() * DRIFT_AMOUNT / 2) * (Math.random() > 0.5 ? 1 : -1);
+      const driftC = (Math.random() * DRIFT_AMOUNT / 2) * (Math.random() > 0.3 ? 1 : -1);
+      
+      newFreqs.A += driftA;
+      newFreqs.B += driftB;
+      newFreqs.C += driftC;
+      
+      // Ensure minimum frequency
+      newFreqs.A = Math.max(newFreqs.A, MIN_ALLELE_FREQ);
+      newFreqs.B = Math.max(newFreqs.B, MIN_ALLELE_FREQ);
+      newFreqs.C = Math.max(newFreqs.C, MIN_ALLELE_FREQ);
+      
+      // Normalize to ensure sum = 1
+      const sum = newFreqs.A + newFreqs.B + newFreqs.C;
+      newFreqs.A /= sum;
+      newFreqs.B /= sum;
+      newFreqs.C /= sum;
+      
+      // CRITICAL: Enforce order A > B > C
+      // If order is violated, adjust frequencies to maintain hierarchy
+      if (newFreqs.B > newFreqs.A) {
+        // Swap and add a small buffer
+        const temp = newFreqs.A;
+        newFreqs.A = newFreqs.B + 0.05;
+        newFreqs.B = temp - 0.05;
+      }
+      
+      if (newFreqs.C > newFreqs.B) {
+        // Swap and add a small buffer
+        const temp = newFreqs.B;
+        newFreqs.B = newFreqs.C + 0.05;
+        newFreqs.C = temp - 0.05;
+      }
+      
+      // Renormalize after enforcing order
+      const finalSum = newFreqs.A + newFreqs.B + newFreqs.C;
+      newFreqs.A /= finalSum;
+      newFreqs.B /= finalSum;
+      newFreqs.C /= finalSum;
+      
+      ALLELE_FREQS = newFreqs;
+    }
+    
+    function arraysEqual(a, b) {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return false;
+      }
+      return true;
     }
 
     function shuffle(arr) {
@@ -252,6 +401,9 @@
           <div class="color-bar"><div class="color-fill" style="width:${pct}%;background-color:purple"></div></div>
         `;
       }
+      
+      html += `<div style="margin-top:10px"><b>Current Mode:</b> ${lessRandomMode ? 'Simplified Mode' : 'Stochastic Mode'}</div>`;
+      
       statsArea.innerHTML = html;
     }
 
@@ -312,15 +464,41 @@
       }[type];
       simArea.appendChild(overlay);
 
-      // decide survivors immediately
+      // decide survivors 
       let survivors;
-      if (Math.random() < 0.6) {
+      
+      if (lessRandomMode) {
+        // In less random mode - ALWAYS wipe out a specific allele
+        // For educational purposes, always target the least frequent allele (C/yellow)
+        // This makes the bottleneck effect more obvious to students
+        survivors = butterflies.filter(b => !b.dataset.genotype.includes('C'));
+        
+        // If no survivors (all had C allele), then try B
+        if (survivors.length === 0) {
+          survivors = butterflies.filter(b => !b.dataset.genotype.includes('B'));
+        }
+        
+        // If still no survivors, target A
+        if (survivors.length === 0) {
+          survivors = butterflies.filter(b => !b.dataset.genotype.includes('A'));
+        }
+        
+        // If somehow still no survivors, take random ones
+        if (survivors.length === 0) {
+          survivors = shuffle(butterflies).slice(0, 8);
+        } else if (survivors.length > 8) {
+          // Cap at 8 survivors
+          survivors = shuffle(survivors).slice(0, 8);
+        }
+      } else if (Math.random() < 0.75) { 
+        // 75% in random mode - choose a random allele to wipe out
         const alleles = ['A','B','C'];
         const wipe = alleles[Math.floor(Math.random()*3)];
         survivors = butterflies.filter(b => !b.dataset.genotype.includes(wipe));
         if (survivors.length > 8) survivors = shuffle(survivors).slice(0,8);
         if (!survivors.length) survivors = shuffle(butterflies).slice(0,8);
       } else {
+        // 25% of the time in random mode - just random culling
         survivors = shuffle(butterflies).slice(0,8);
       }
 
@@ -343,9 +521,22 @@
         setTimeout(() => overlay.remove(), 500);
       }, fadeTime);
     }
+    
+    function updateMode() {
+      lessRandomMode = modeToggle.checked;
+      if (lessRandomMode) {
+        DRIFT_AMOUNT = LESS_RANDOM_MODE.DRIFT_AMOUNT;
+        MIN_ALLELE_FREQ = LESS_RANDOM_MODE.MIN_ALLELE_FREQ;
+      } else {
+        DRIFT_AMOUNT = RANDOMIZER_MODE.DRIFT_AMOUNT;
+        MIN_ALLELE_FREQ = RANDOMIZER_MODE.MIN_ALLELE_FREQ;
+      }
+      updateStats();
+    }
 
     breedBtn.addEventListener('click', breedNextGeneration);
     resetBtn.addEventListener('click', initSimulation);
+    modeToggle.addEventListener('change', updateMode);
     disasterBtns.forEach(b => b.addEventListener('click', () => executeDisaster(b.dataset.type)));
 
     window.addEventListener('load', () => setTimeout(initSimulation,100));
