@@ -86,55 +86,6 @@
       border-bottom: 1px solid #ccc;
       padding-bottom: 5px;
     }
-    /* Toggle switch styling */
-    .switch-container {
-      display: flex;
-      align-items: center;
-      margin: 20px 0;
-      padding: 10px;
-      background-color: #e0e0e0;
-      border-radius: 4px;
-    }
-    .switch {
-      position: relative;
-      display: inline-block;
-      width: 60px;
-      height: 30px;
-      margin: 0 10px;
-    }
-    .switch input {
-      opacity: 0;
-      width: 0;
-      height: 0;
-    }
-    .slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #ccc;
-      transition: .4s;
-      border-radius: 34px;
-    }
-    .slider:before {
-      position: absolute;
-      content: "";
-      height: 22px;
-      width: 22px;
-      left: 4px;
-      bottom: 4px;
-      background-color: white;
-      transition: .4s;
-      border-radius: 50%;
-    }
-    input:checked + .slider {
-      background-color: #2196F3;
-    }
-    input:checked + .slider:before {
-      transform: translateX(30px);
-    }
-    .mode-label {
-      font-weight: bold;
-    }
   </style>
 </head>
 <body>
@@ -142,16 +93,6 @@
     <div id="simulation-area"></div>
     <div id="control-panel">
       <h2>Butterfly Genetic Drift</h2>
-      
-      <div class="switch-container">
-        <span class="mode-label">Stochastic Mode</span>
-        <label class="switch">
-          <input type="checkbox" id="mode-toggle">
-          <span class="slider"></span>
-        </label>
-        <span class="mode-label">Simplified Mode</span>
-      </div>
-      
       <button id="breed-btn">Breed Next Generation</button>
       <button id="reset-btn">Reset Simulation</button>
       <div class="generation-counter">
@@ -172,30 +113,18 @@
       <div class="stats-container">
         <h3>How It Works</h3>
         <p>Each butterfly has a genotype that determines its color. When breeding, offspring inherit one random allele from each parent. Blue is dominant, red is second, yellow is third.</p>
-        <p><strong>Stochastic Mode:</strong> More complex variation and unpredictable effects.</p>
-        <p><strong>Simplified Mode:</strong> More predictable outcomes to highlight the effect. Use this mode with the worksheet!</p>
+        <p>Between generations, allele frequencies fluctuate by up to 5% from the reference values. Disasters reset the reference values based on survivors.</p>
       </div>
     </div>
   </div>
 
   <script>
-    // The initial frequencies ensure A > B > C order (blue > red > yellow)
-    const INITIAL_ALLELE_FREQS = { A: 0.50, B: 0.30, C: 0.20 };
+    const INITIAL_ALLELE_FREQS = { A: 0.40, B: 0.35, C: 0.25 };
     let ALLELE_FREQS = { ...INITIAL_ALLELE_FREQS };
 
-    const RANDOMIZER_MODE = {
-      DRIFT_AMOUNT: 0.01,    // ±1% per generation
-      MIN_ALLELE_FREQ: 0.01  // clamp non-zero alleles ≥1%
-    };
-    
-    const LESS_RANDOM_MODE = {
-      DRIFT_AMOUNT: 0.005,   // ±0.5% per generation
-      MIN_ALLELE_FREQ: 0.02  // clamp non-zero alleles ≥2%
-    };
-    
-    // Default to randomizer mode
-    let DRIFT_AMOUNT = RANDOMIZER_MODE.DRIFT_AMOUNT;
-    let MIN_ALLELE_FREQ = RANDOMIZER_MODE.MIN_ALLELE_FREQ;
+    // Track reference allele frequencies (reset after disasters)
+    let REFERENCE_ALLELE_FREQS = { ...INITIAL_ALLELE_FREQS };
+    const MIN_ALLELE_FREQ = 0.01;   // clamp non-zero alleles ≥1%
 
     const COLORS = [
       { color: 'dodgerblue', name: 'Blue',   cssClass: 'blue-butterfly' },
@@ -212,7 +141,6 @@
 
     let butterflies = [];
     let generation  = 1;
-    let lessRandomMode = false;
 
     const simArea      = document.getElementById('simulation-area');
     const breedBtn     = document.getElementById('breed-btn');
@@ -220,7 +148,6 @@
     const genCount     = document.getElementById('generation');
     const statsArea    = document.getElementById('stats-area');
     const disasterBtns = document.querySelectorAll('#disaster-buttons button');
-    const modeToggle   = document.getElementById('mode-toggle');
 
     function randomAllele() {
       let r = Math.random(), cum = 0;
@@ -232,20 +159,17 @@
     }
 
     function applyDrift() {
-      if (lessRandomMode) {
-        // Less random mode - maintain frequency order
-        applyConstrainedDrift();
-      } else {
-        // Random-er mode - original algorithm
-        applyRandomDrift();
-      }
-    }
-    
-    function applyRandomDrift() {
       let newFreqs = {}, sum = 0;
       for (let a in ALLELE_FREQS) {
         if (ALLELE_FREQS[a] > 0) {
-          let d = ALLELE_FREQS[a] + (Math.random()*2 - 1) * DRIFT_AMOUNT;
+          // Add a maximum cap of 5% change in either direction
+          const maxChange = 0.05;
+          let randomDrift = (Math.random()*2 - 1) * DRIFT_AMOUNT;
+          
+          // Ensure the drift doesn't exceed our 5% cap
+          randomDrift = Math.max(Math.min(randomDrift, maxChange), -maxChange);
+          
+          let d = ALLELE_FREQS[a] + randomDrift;
           d = Math.max(d, MIN_ALLELE_FREQ);
           newFreqs[a] = d;
           sum += d;
@@ -260,70 +184,6 @@
       }
       ALLELE_FREQS = newFreqs;
     }
-    
-    function applyConstrainedDrift() {
-      // Instead of using the current sorted order, we'll enforce the preset order: A > B > C
-      // This ensures blue always remains dominant, red second, yellow third
-      
-      // Start with small, controlled adjustments
-      let newFreqs = { 
-        A: ALLELE_FREQS.A, 
-        B: ALLELE_FREQS.B, 
-        C: ALLELE_FREQS.C 
-      };
-      
-      // Apply very small random adjustments
-      const driftA = (Math.random() * DRIFT_AMOUNT / 2) * (Math.random() > 0.7 ? 1 : -1);
-      const driftB = (Math.random() * DRIFT_AMOUNT / 2) * (Math.random() > 0.5 ? 1 : -1);
-      const driftC = (Math.random() * DRIFT_AMOUNT / 2) * (Math.random() > 0.3 ? 1 : -1);
-      
-      newFreqs.A += driftA;
-      newFreqs.B += driftB;
-      newFreqs.C += driftC;
-      
-      // Ensure minimum frequency
-      newFreqs.A = Math.max(newFreqs.A, MIN_ALLELE_FREQ);
-      newFreqs.B = Math.max(newFreqs.B, MIN_ALLELE_FREQ);
-      newFreqs.C = Math.max(newFreqs.C, MIN_ALLELE_FREQ);
-      
-      // Normalize to ensure sum = 1
-      const sum = newFreqs.A + newFreqs.B + newFreqs.C;
-      newFreqs.A /= sum;
-      newFreqs.B /= sum;
-      newFreqs.C /= sum;
-      
-      // CRITICAL: Enforce order A > B > C
-      // If order is violated, adjust frequencies to maintain hierarchy
-      if (newFreqs.B > newFreqs.A) {
-        // Swap and add a small buffer
-        const temp = newFreqs.A;
-        newFreqs.A = newFreqs.B + 0.05;
-        newFreqs.B = temp - 0.05;
-      }
-      
-      if (newFreqs.C > newFreqs.B) {
-        // Swap and add a small buffer
-        const temp = newFreqs.B;
-        newFreqs.B = newFreqs.C + 0.05;
-        newFreqs.C = temp - 0.05;
-      }
-      
-      // Renormalize after enforcing order
-      const finalSum = newFreqs.A + newFreqs.B + newFreqs.C;
-      newFreqs.A /= finalSum;
-      newFreqs.B /= finalSum;
-      newFreqs.C /= finalSum;
-      
-      ALLELE_FREQS = newFreqs;
-    }
-    
-    function arraysEqual(a, b) {
-      if (a.length !== b.length) return false;
-      for (let i = 0; i < a.length; i++) {
-        if (a[i] !== b[i]) return false;
-      }
-      return true;
-    }
 
     function shuffle(arr) {
       const a = arr.slice();
@@ -334,7 +194,32 @@
       return a;
     }
 
+    // Fix the genotype-phenotype relationship
+    function getColorForGenotype(genotype) {
+      // Check if the genotype contains ANY extinct alleles
+      for (let i = 0; i < genotype.length; i++) {
+        const allele = genotype[i];
+        if (REFERENCE_ALLELE_FREQS[allele] === 0) {
+          // This should never happen - we're creating a butterfly with an extinct allele!
+          console.error(`ERROR: Attempted to create butterfly with extinct allele ${allele}!`);
+          return -1; // Invalid color
+        }
+      }
+      
+      // If all alleles exist, use the normal mapping
+      return GENOTYPES[genotype];
+    }
+
     function createButterfly(gen) {
+      // Verify the genotype doesn't contain any extinct alleles
+      for (let i = 0; i < gen.length; i++) {
+        const allele = gen[i];
+        if (REFERENCE_ALLELE_FREQS[allele] === 0) {
+          console.error(`ERROR: Attempted to create butterfly with extinct allele ${allele}!`);
+          return null; // Don't create invalid butterflies
+        }
+      }
+      
       const idx = GENOTYPES[gen];
       const b = document.createElement('div');
       b.className = `butterfly ${COLORS[idx].cssClass}`;
@@ -377,14 +262,20 @@
       setTimeout(step, Math.random()*2000);
     }
 
+    // Clean up the stats display
     function updateStats() {
       const counts = [0,0,0], alleles = {A:0,B:0,C:0};
+      
+      // Count alleles in actual butterflies
       butterflies.forEach(b => {
         counts[+b.dataset.colorIndex]++;
         const g = b.dataset.genotype;
         alleles[g[0]]++; alleles[g[1]]++;
       });
+      
       const total = butterflies.length, totalAlleles = total*2;
+      
+      // Phenotype stats
       let html = '<b>Phenotypes (Colors):</b>';
       COLORS.forEach((c,i) => {
         const pct = total ? ((counts[i]/total)*100).toFixed(1) : 0;
@@ -393,44 +284,219 @@
           <div class="color-bar"><div class="color-fill" style="width:${pct}%;background-color:${c.color}"></div></div>
         `;
       });
+      
+      // Calculate percentages that sum to 100%
+      const adjustedPercentages = {A: 0, B: 0, C: 0};
+      
+      // First identify extinct alleles and calculate total non-extinct alleles
+      const nonExtinctAlleles = [];
+      let nonExtinctCount = 0;
+      
+      for (let a of ['A', 'B', 'C']) {
+        if (REFERENCE_ALLELE_FREQS[a] === 0) {
+          adjustedPercentages[a] = 0; // Extinct allele stays at 0%
+        } else {
+          nonExtinctAlleles.push(a);
+          nonExtinctCount += alleles[a];
+        }
+      }
+      
+      // Calculate percentages for non-extinct alleles that sum to 100%
+      for (let a of nonExtinctAlleles) {
+        if (nonExtinctCount > 0) {
+          adjustedPercentages[a] = (alleles[a] / nonExtinctCount) * 100;
+        } else {
+          adjustedPercentages[a] = 0;
+        }
+      }
+      
+      // Allele stats
       html += '<b>Allele Frequencies:</b>';
       for (let a of ['A','B','C']) {
-        const pct = totalAlleles ? ((alleles[a]/totalAlleles)*100).toFixed(1) : 0;
+        // For extinct alleles, always show 0%
+        if (REFERENCE_ALLELE_FREQS[a] === 0) {
+          html += `
+            <div>Allele ${a}: 0.0% <span style="color:red; font-weight:bold"></span></div>
+            <div class="color-bar"><div class="color-fill" style="width:0%;background-color:purple"></div></div>
+          `;
+          continue;
+        }
+        
+        // For non-extinct alleles, use adjusted percentages (without change indicators)
+        const pct = adjustedPercentages[a].toFixed(1);
+        
         html += `
           <div>Allele ${a}: ${pct}%</div>
           <div class="color-bar"><div class="color-fill" style="width:${pct}%;background-color:purple"></div></div>
         `;
       }
       
-      html += `<div style="margin-top:10px"><b>Current Mode:</b> ${lessRandomMode ? 'Simplified Mode' : 'Stochastic Mode'}</div>`;
-      
       statsArea.innerHTML = html;
     }
 
     function initSimulation() {
+      // Reset reference and current frequencies
+      REFERENCE_ALLELE_FREQS = { ...INITIAL_ALLELE_FREQS };
       ALLELE_FREQS = { ...INITIAL_ALLELE_FREQS };
+      
+      // Clear existing butterflies
       butterflies.forEach(b => b.remove());
       butterflies = [];
+      
+      // Reset generation counter
       generation = 1;
       genCount.textContent = generation;
-      for (let i = 0; i < INIT_POPULATION; i++) {
-        const g1 = randomAllele(), g2 = randomAllele();
-        createButterfly([g1,g2].sort().join(''));
+      
+      // Create initial population with exact counts to match reference
+      const newSize = INIT_POPULATION;
+      
+      // Calculate exact allele counts needed
+      const allelesNeeded = {
+        A: Math.round(newSize * 2 * REFERENCE_ALLELE_FREQS.A),
+        B: Math.round(newSize * 2 * REFERENCE_ALLELE_FREQS.B),
+        C: Math.round(newSize * 2 * REFERENCE_ALLELE_FREQS.C)
+      };
+      
+      // Adjust to ensure total is exactly 2 * newSize
+      const totalAlleles = allelesNeeded.A + allelesNeeded.B + allelesNeeded.C;
+      if (totalAlleles != newSize * 2) {
+        const diff = (newSize * 2) - totalAlleles;
+        
+        // Add or remove from the largest or smallest count
+        if (diff > 0) {
+          // Need to add alleles
+          const largest = Object.entries(allelesNeeded).sort((a, b) => b[1] - a[1])[0][0];
+          allelesNeeded[largest] += diff;
+        } else {
+          // Need to remove alleles
+          const smallest = Object.entries(allelesNeeded).sort((a, b) => a[1] - b[1])[0][0];
+          allelesNeeded[smallest] = Math.max(1, allelesNeeded[smallest] + diff);
+        }
       }
+      
+      // Create allele pool with exact counts
+      const allelePool = [];
+      for (let allele in allelesNeeded) {
+        for (let i = 0; i < allelesNeeded[allele]; i++) {
+          allelePool.push(allele);
+        }
+      }
+      
+      // Shuffle allele pool
+      const shuffledPool = shuffle(allelePool);
+      
+      // Create butterflies with paired alleles from pool
+      for (let i = 0; i < newSize; i++) {
+        const a1 = shuffledPool[i*2];
+        const a2 = shuffledPool[i*2+1];
+        createButterfly([a1, a2].sort().join(''));
+      }
+      
       updateStats();
     }
 
     function breedNextGeneration() {
       if (!butterflies.length) return alert("Population extinct! Please reset.");
-      applyDrift();
-      const newGen = [];
-      const newSize = Math.min(MAX_POPULATION, Math.floor(butterflies.length * 1.5));
-      for (let i = 0; i < newSize; i++) {
-        const a1 = randomAllele(), a2 = randomAllele();
-        newGen.push([a1,a2].sort().join(''));
+      
+      // DIRECT APPROACH: Set exact allele frequencies with strict 5% limits
+      const newFreqs = {};
+      
+      // Apply controlled random fluctuations (±5% max)
+      for (let allele in REFERENCE_ALLELE_FREQS) {
+        // Generate random fluctuation between -5% and +5%
+        const fluctuation = (Math.random() * 0.1 - 0.05);
+        const newFreq = REFERENCE_ALLELE_FREQS[allele] + fluctuation;
+        
+        // Ensure minimum frequency and store
+        newFreqs[allele] = Math.max(newFreq, 0.01);
       }
+      
+      // Normalize to ensure sum equals 1
+      const sum = newFreqs.A + newFreqs.B + newFreqs.C;
+      newFreqs.A /= sum;
+      newFreqs.B /= sum;
+      newFreqs.C /= sum;
+      
+      // Double-check no change exceeds 5% after normalization
+      let needsAdjustment = false;
+      const adjustedFreqs = {};
+      
+      for (let allele in newFreqs) {
+        const change = Math.abs(newFreqs[allele] - REFERENCE_ALLELE_FREQS[allele]);
+        
+        if (change > 0.05) {
+          needsAdjustment = true;
+          // Exactly 5% change
+          if (newFreqs[allele] > REFERENCE_ALLELE_FREQS[allele]) {
+            adjustedFreqs[allele] = REFERENCE_ALLELE_FREQS[allele] + 0.05;
+          } else {
+            adjustedFreqs[allele] = REFERENCE_ALLELE_FREQS[allele] - 0.05;
+          }
+        } else {
+          adjustedFreqs[allele] = newFreqs[allele];
+        }
+      }
+      
+      // Re-normalize adjusted frequencies if needed
+      if (needsAdjustment) {
+        const adjustedSum = adjustedFreqs.A + adjustedFreqs.B + adjustedFreqs.C;
+        adjustedFreqs.A /= adjustedSum;
+        adjustedFreqs.B /= adjustedSum;
+        adjustedFreqs.C /= adjustedSum;
+        ALLELE_FREQS = adjustedFreqs;
+      } else {
+        ALLELE_FREQS = newFreqs;
+      }
+      
+      // GENERATE EXACT ALLELE COUNTS to match our frequencies precisely
       butterflies.forEach(b => b.remove());
-      butterflies = newGen.map(createButterfly);
+      butterflies = [];
+      
+      const newSize = Math.min(MAX_POPULATION, 60); // Use fixed size for better precision
+      
+      // Calculate exact allele counts needed
+      const allelesNeeded = {
+        A: Math.round(newSize * 2 * ALLELE_FREQS.A),
+        B: Math.round(newSize * 2 * ALLELE_FREQS.B),
+        C: Math.round(newSize * 2 * ALLELE_FREQS.C)
+      };
+      
+      // Adjust to ensure total is exactly 2 * newSize
+      const totalAlleles = allelesNeeded.A + allelesNeeded.B + allelesNeeded.C;
+      if (totalAlleles != newSize * 2) {
+        const diff = (newSize * 2) - totalAlleles;
+        
+        // Add or remove from the largest or smallest count
+        if (diff > 0) {
+          // Need to add alleles
+          const largest = Object.entries(allelesNeeded).sort((a, b) => b[1] - a[1])[0][0];
+          allelesNeeded[largest] += diff;
+        } else {
+          // Need to remove alleles
+          const smallest = Object.entries(allelesNeeded).sort((a, b) => a[1] - b[1])[0][0];
+          allelesNeeded[smallest] = Math.max(1, allelesNeeded[smallest] + diff);
+        }
+      }
+      
+      // Create allele pool with exact counts
+      const allelePool = [];
+      for (let allele in allelesNeeded) {
+        for (let i = 0; i < allelesNeeded[allele]; i++) {
+          allelePool.push(allele);
+        }
+      }
+      
+      // Shuffle allele pool
+      const shuffledPool = shuffle(allelePool);
+      
+      // Create butterflies with paired alleles from pool
+      for (let i = 0; i < newSize; i++) {
+        const a1 = shuffledPool[i*2];
+        const a2 = shuffledPool[i*2+1];
+        createButterfly([a1, a2].sort().join(''));
+      }
+      
+      // Update generation and stats
       generation++;
       genCount.textContent = generation;
       updateStats();
@@ -464,43 +530,35 @@
       }[type];
       simArea.appendChild(overlay);
 
-      // decide survivors 
-      let survivors;
+      // MODIFIED: Always choose one random allele to wipe out
+      const alleles = ['A', 'B', 'C'];
+      const wipeIndex = Math.floor(Math.random() * 3);
+      const wipe = alleles[wipeIndex];
       
-      if (lessRandomMode) {
-        // In less random mode - ALWAYS wipe out a specific allele
-        // For educational purposes, always target the least frequent allele (C/yellow)
-        // This makes the bottleneck effect more obvious to students
-        survivors = butterflies.filter(b => !b.dataset.genotype.includes('C'));
-        
-        // If no survivors (all had C allele), then try B
-        if (survivors.length === 0) {
-          survivors = butterflies.filter(b => !b.dataset.genotype.includes('B'));
-        }
-        
-        // If still no survivors, target A
-        if (survivors.length === 0) {
-          survivors = butterflies.filter(b => !b.dataset.genotype.includes('A'));
-        }
-        
-        // If somehow still no survivors, take random ones
-        if (survivors.length === 0) {
-          survivors = shuffle(butterflies).slice(0, 8);
-        } else if (survivors.length > 8) {
-          // Cap at 8 survivors
-          survivors = shuffle(survivors).slice(0, 8);
-        }
-      } else if (Math.random() < 0.75) { 
-        // 75% in random mode - choose a random allele to wipe out
-        const alleles = ['A','B','C'];
-        const wipe = alleles[Math.floor(Math.random()*3)];
-        survivors = butterflies.filter(b => !b.dataset.genotype.includes(wipe));
-        if (survivors.length > 8) survivors = shuffle(survivors).slice(0,8);
-        if (!survivors.length) survivors = shuffle(butterflies).slice(0,8);
-      } else {
-        // 25% of the time in random mode - just random culling
-        survivors = shuffle(butterflies).slice(0,8);
+      // Find butterflies that don't have the wiped allele
+      let survivors = butterflies.filter(b => !b.dataset.genotype.includes(wipe));
+      
+      // Ensure we have some survivors (at least 5, but no more than 8)
+      if (survivors.length > 8) {
+        survivors = shuffle(survivors).slice(0, 8);
+      } else if (survivors.length < 5 && butterflies.length > 5) {
+        // If we have too few survivors, add some random ones to ensure population continuity
+        const additionalSurvivors = shuffle(butterflies.filter(b => !survivors.includes(b))).slice(0, 5 - survivors.length);
+        survivors = [...survivors, ...additionalSurvivors];
+      } else if (survivors.length === 0) {
+        // If no survivors at all, take a random 5
+        survivors = shuffle(butterflies).slice(0, 5);
       }
+
+      // Display which allele was wiped out
+      const disasterInfo = document.createElement('div');
+      disasterInfo.style.cssText = `
+        position:absolute; bottom:10px; left:10px; right:10px;
+        background:rgba(255,255,255,0.8); padding:10px; border-radius:5px;
+        text-align:center; font-weight:bold; z-index:101;
+      `;
+      disasterInfo.textContent = `Disaster has wiped out Allele ${wipe}!`;
+      simArea.appendChild(disasterInfo);
 
       // fade out those not surviving
       const fadeTime = 1000;
@@ -516,27 +574,48 @@
         butterflies = survivors;
 
         updateStats();
-        updateBaseAlleleFreqs();
+        
+        // NEW: Update the reference frequencies based on survivors
+        // This becomes the new baseline for Hardy-Weinberg equilibrium
+        updateReferenceFrequencies();
 
-        setTimeout(() => overlay.remove(), 500);
+        setTimeout(() => {
+          overlay.remove();
+          disasterInfo.remove();
+        }, 2000);
       }, fadeTime);
     }
     
-    function updateMode() {
-      lessRandomMode = modeToggle.checked;
-      if (lessRandomMode) {
-        DRIFT_AMOUNT = LESS_RANDOM_MODE.DRIFT_AMOUNT;
-        MIN_ALLELE_FREQ = LESS_RANDOM_MODE.MIN_ALLELE_FREQ;
-      } else {
-        DRIFT_AMOUNT = RANDOMIZER_MODE.DRIFT_AMOUNT;
-        MIN_ALLELE_FREQ = RANDOMIZER_MODE.MIN_ALLELE_FREQ;
+    // Update reference frequencies after a disaster
+    function updateReferenceFrequencies() {
+      const counts = {A:0, B:0, C:0};
+      
+      // Count alleles in surviving population
+      butterflies.forEach(b => {
+        const g = b.dataset.genotype;
+        counts[g[0]]++; counts[g[1]]++;
+      });
+      
+      const totalAlleles = butterflies.length * 2;
+      
+      // Calculate new reference frequencies - key point: if an allele is missing, set to 0
+      if (totalAlleles > 0) {
+        for (let a of ['A', 'B', 'C']) {
+          // If allele count is 0, set reference to 0 (extinct)
+          if (counts[a] === 0) {
+            REFERENCE_ALLELE_FREQS[a] = 0;
+          } else {
+            REFERENCE_ALLELE_FREQS[a] = counts[a] / totalAlleles;
+          }
+        }
       }
-      updateStats();
+      
+      // Update current frequencies to match
+      ALLELE_FREQS = { ...REFERENCE_ALLELE_FREQS };
     }
 
     breedBtn.addEventListener('click', breedNextGeneration);
     resetBtn.addEventListener('click', initSimulation);
-    modeToggle.addEventListener('change', updateMode);
     disasterBtns.forEach(b => b.addEventListener('click', () => executeDisaster(b.dataset.type)));
 
     window.addEventListener('load', () => setTimeout(initSimulation,100));
